@@ -37,16 +37,48 @@ struct DynamicCamera {
                 const sf::Vector2f& trackedPosWorld,      // world coords of player to track
                 const sf::Vector2f& trackedVelocityWorld  // world velocity of player to track
     ) {
-        // TODO: (HINTS/outline)
-        // collect statistics on the player position and velocity in (normalized, if you like)
-        // window coordinates. Compute lookAhead distance in world coords, adjusting for
-        // if the player is moving left or right.
-        // Now update lookAhead state using an EMA over its previous state and the lookAhead world
-        // vector. Then determine if the player is in the dead zone, soft rejection zone, or hard
-        // rejection zone. For each, perform EMA on the delta of the camera displacement (ignoring
-        // lookahead) appropriately. Next,
-        // set the camera center by offsetting the cameraUnadjustedCenter, combining lookAhead.
-        // Finally update cameraUnadjustedCenter, but without lookahead.
+        // Player position in normalized window coords, relative to the camera *without*
+        // lookahead (the actual camera center is shifted by lookaheadState, so we can't use
+        // camera.worldToWindowPercent directly). The unadjusted center maps to 0.5.
+        const float playerX =
+            camera.worldToWindowPercentDist(trackedPosWorld - cameraUnadjustedCenter).x + 0.5f;
+
+        // Lookahead target in world coords: ahead in the direction of motion, 0 when stopped.
+        float lookAheadTargetWorld = 0.f;
+        if (trackedVelocityWorld.x > 0.f) {
+            lookAheadTargetWorld = camera.windowPercentToWorldDist({lookAhead, 0.f}).x;
+        } else if (trackedVelocityWorld.x < 0.f) {
+            lookAheadTargetWorld = -camera.windowPercentToWorldDist({lookAhead, 0.f}).x;
+        }
+        lookaheadState = alpha * lookAheadTargetWorld + (1.f - alpha) * lookaheadState;
+
+        // Signed amount (window percent) by which x lies outside the interval; 0 if inside.
+        auto overshoot = [](const Interval& interval, float x) {
+            if (x > interval.max) {
+                return x - interval.max;
+            }
+            if (x < interval.min) {
+                return x - interval.min;
+            }
+            return 0.f;
+        };
+        const float deadOvershoot = overshoot(deadZoneX, playerX);
+        const float softOvershoot = overshoot(softZoneX, playerX);
+
+        // Dead zone: no movement (deadOvershoot == 0).
+        // Soft zone: EMA the camera toward bringing the player back to the dead zone edge.
+        float displacementPercent = alpha * deadOvershoot;
+        if (softOvershoot != 0.f) {
+            // Hard zone: immediately move enough to put the player back on the soft zone edge,
+            // then EMA the remainder toward the dead zone edge as in the soft zone.
+            displacementPercent = softOvershoot + alpha * (deadOvershoot - softOvershoot);
+        }
+
+        sf::Vector2f newUnadjustedCenter = cameraUnadjustedCenter;
+        newUnadjustedCenter.x += camera.windowPercentToWorldDist({displacementPercent, 0.f}).x;
+
+        camera.setCameraCenter(newUnadjustedCenter + sf::Vector2f{lookaheadState, 0.f});
+        cameraUnadjustedCenter = newUnadjustedCenter;
     }
 
     float alpha;  // alpha to use for damping of camera position, *as well as* for smoothing of
