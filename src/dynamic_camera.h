@@ -62,16 +62,20 @@ struct DynamicCamera {
             }
             return 0.f;
         };
-        const float deadOvershoot = overshoot(deadZoneX, playerX);
-        const float softOvershoot = overshoot(softZoneX, playerX);
-
-        // Dead zone: no movement (deadOvershoot == 0).
-        // Soft zone: EMA the camera toward bringing the player back to the dead zone edge.
-        float displacementPercent = alpha * deadOvershoot;
-        if (softOvershoot != 0.f) {
+        // Camera displacement (window percent), ignoring lookahead.
+        float displacementPercent = 0.f;
+        if (deadZoneX.contains(playerX)) {
+            // Dead zone: the camera does not move.
+            displacementPercent = 0.f;
+        } else if (softZoneX.contains(playerX)) {
+            // Soft zone: EMA the camera toward bringing the player back to the dead zone edge.
+            displacementPercent = alpha * overshoot(deadZoneX, playerX);
+        } else {
             // Hard zone: immediately move enough to put the player back on the soft zone edge,
             // then EMA the remainder toward the dead zone edge as in the soft zone.
-            displacementPercent = softOvershoot + alpha * (deadOvershoot - softOvershoot);
+            const float softOvershoot = overshoot(softZoneX, playerX);
+            displacementPercent =
+                softOvershoot + alpha * (overshoot(deadZoneX, playerX) - softOvershoot);
         }
 
         sf::Vector2f newUnadjustedCenter = cameraUnadjustedCenter;
